@@ -39,9 +39,10 @@ from struct import pack, unpack
 import datetime
 import pdb
 
-mymac_def = "e8:ff:1e:d5:94:85"
-swmac_def = "54:07:7d:22:4f:e1"
+mymac_def = "00:00:00:00:00:00"
+swmac_def = "54:07:7d:99:99:99"
 admpw_def = b'password'
+
 
 def enc_str(strval):
     if isinstance(strval,str): strval = strval.encode('ascii')
