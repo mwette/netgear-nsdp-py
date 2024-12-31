@@ -1,4 +1,4 @@
-# tool for Netgar switches using NSDP
+# tool for Netgear switches using NSDP
 
 coded in python
 
