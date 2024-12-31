@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+#
+# Copyright (C) 2024 Matthew Wette
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+# usage:
+#   $ nsdpx MODEL MAC_ADDR IP_ADDR
+#   result: 0x0
+#   MODEL b'GS105Ev'
+#   MAC_ADDR 54:07:7d:99:99:99
+#   IP_ADDR 192.168.0.239
+#
+#   $ nsdpx IP_ADDR=192.168.1.10 IP_MASK=255.255.255.0
+#   not working :(
+#
+# loc: github.com/mwette/netgear-nsdp-py
+#
+# see: wikipedia.org/wiki/Netgear_Switch_Discovery_Protocol
+#      github.com/kvishnivetsky/NetgearProSafeUtils
+#      github.com/bengal/ndspc
+#
+
+import sys
+import socket
+from struct import pack, unpack
+import datetime
+import pdb
+
+mymac_def = "e8:ff:1e:d5:94:85"
+swmac_def = "54:07:7d:22:4f:e1"
+admpw_def = b'password'
+
+def enc_str(strval):
+    if isinstance(strval,str): strval = strval.encode('ascii')
+    return strval
+
+def dec_str(data):
+    return data
+
+def enc_num(strval):
+    return pack(">H", int(strval))
+
+def dec_num(data):
+    return unpack(">H", data)[0]
+
+def enc_mac(strval):
+    vals = list(map(lambda s: int(s, 16), strval.split(':')))
+    return pack(">6B", *vals)
+
+def dec_mac(data):
+    return "%02x:%02x:%02x:%02x:%02x:%02x" % unpack(">6B", data)
+
+def enc_ip(strval):
+    vals = list(map(lambda s: int(s, 10), strval.split('.')))
+    return pack(">4B", *vals)
+
+def dec_ip(data):
+    return "%d.%d.%d.%d" % unpack(">4B", data)
+
+def enc_pw(pw):
+    #val = bytearray(pw)
+    #for ix in range(len(val)):
+    #    val[ix] = salt[ix % len(salt)] ^ val[ix]
+    #return val
+    return pw
+
+def dec_pw(pw):
+    return "(no can do yet)"
+
+# speed: 0: off; 1: 10M; 4: 100M; 5; 1000M
+
+cmddict = {
+    'MODEL': (0x0001, enc_str, dec_str),
+    'NAME': (0x0002, enc_str, dec_str),
+    'MAC_ADDR': (0x0004, enc_mac, dec_mac),
+    'IP_ADDR': (0x0006, enc_ip, dec_ip),
+    'IP_MASK': (0x0007, enc_ip, dec_ip),
+    'IP_GATE': (0x0008, enc_ip, dec_ip),
+    'NEW_PASS': (0x0009, enc_pw, dec_pw),
+    'PASSWORD': (0x000a, enc_pw, dec_pw),
+    'DHCP': (0x000b, enc_num, dec_num),
+    'FIRMWARE': (0x000d, enc_str, dec_str),
+    'REBOOT': (0x0013, enc_num, dec_num),
+    'SPEED': (0x0c00, enc_num, dec_num),
+    'PORT_STAT': (0x1000, enc_num, dec_num),
+    'VLAN_SUPP': (0x2000, enc_num, dec_num),
+    'NPORTS': (0x6000, enc_num, dec_num),
+    '_END_': (0xffff, None, None),
+    }
+cnamed = dict(map(lambda it: (it[1][0],it[0]), cmddict.items()))
+
+mymac = mymac_def
+swmac = swmac_def
+admpw = admpw_def
+seqno = int(datetime.datetime.now().timestamp()) % 65536
+sock = None
+addr = None
+
+mymacvals = list(map(lambda s: int(s, 16), mymac.split(':')))
+swmacvals = list(map(lambda s: int(s, 16), swmac.split(':')))
+
+salt = [ 0x4e, 0x74, 0x67, 0x72, 0x53, 0x6d, 0x61, 0x72, 0x74, 0x53,
+         0x77, 0x69, 0x74, 0x63, 0x68, 0x52, 0x6f, 0x63, 0x6b ]
+
+
+def gen_header(op, seqno):
+    """
+    header is 32 bytes
+    op: 'r' or 'w'
+    """
+    rw = 1 if op=='r' else 3 if op=='w' else None
+    data = pack('>BBH4x', 1, rw, 0)
+    data += pack(">6B", *mymacvals)
+    data += pack(">6B", *swmacvals)
+    data += pack(">2xH", seqno)
+    data += b'NSDP'
+    data += pack(">4x")
+    return data
+
+def gen_getter(cmd):
+    # generate type-length-value: cmd-0-none
+    code,enc,dec = cmddict[cmd]
+    return pack('>HH', code, 0)
+
+def gen_setter(cmd, strval):
+    # generate type-length-value: cmd-0-none
+    pdb.set_trace()
+    code,enc,dec = cmddict[cmd]
+    data = enc(strval)
+    return pack('>HH', code, len(data)) + data
+
+trailer = pack(">HH", 0xffff, 0);
+
+
+def get_many(keys):
+    data = gen_header('r', seqno)
+    for key in keys:
+        data += gen_getter(key)
+    data += trailer
+    return data
+
+def set_many(exps):
+    data = gen_header('w', seqno)
+    data += pack(">HH", 0x000a, len(admpw))
+    data += enc_pw(admpw)
+    for exp in exps:
+        key,val = exp.split('=')
+        data += gen_setter(key, val)
+    data += trailer
+    return data
+
+
+import argparse
+
+ap = argparse.ArgumentParser()
+ap.add_argument("fields", nargs='*', help="key ... or key=val ...")
+
+def main(argv):
+    global sock, addr, seqno
+
+    args = ap.parse_args(args=argv[1:])
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(2.0)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(('', 63321))
+    addr = ('255.255.255.255', 63322)
+    seqno = (seqno + 1) % 65536
+
+    flds = args.fields
+    if all(map(lambda a: a.find("=")>=0, flds)):
+        try:
+            data = set_many(flds)
+        except:
+            data = None
+
+    elif any(map(lambda a: a.find("=")>=0, flds)):
+        print("nsdpx: cannot mix gets and sets")
+        sys.exit(1)
+
+    else:
+        try:
+            data = get_many(flds)
+        except:
+            data = None
+
+    if data is None:
+        print("bad args")
+        sys.exit(1)
+        
+    if False:
+        ln = len(data)
+        for ix in range(ln):
+            if (ix > 0) and ((ix % 16) == 0): print("")
+            print(" %02x" % data[ix], end='')
+        if (ix % 16) > 0: print("")
+        #sys.exit(0)
+    
+    sock.sendto(data, addr)
+    try:
+        data = sock.recvfrom(1024)[0]
+    except TimeoutError():
+        print("timed out waiting for response")
+        
+    res, = unpack(">H", data[2:4])
+    print("result: 0x%x" % res)
+    if len(data) > 32:
+        ix = 32
+        while True:
+            ty,ln = unpack(">HH", data[ix:ix+4])
+            ix += 4
+            if (ty == 0xffff) and (ln == 0x0000):
+                break
+            vb = data[ix:ix+ln]
+            ix += ln
+            #
+            cmd = cnamed[ty]
+            print(cmd, cmddict[cmd][2](vb))
+            pass
+    return
+
+if __name__ == '__main__':
+    main(sys.argv)
+
+# --- last line ---
